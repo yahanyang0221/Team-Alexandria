@@ -37,6 +37,8 @@ This repository contains scripts for loading and preprocessing IPEDS and College
 - Inserts data into the appropriate tables 
 
 ### 6. Execution
-- Run the script: 
+- Run the script:
+```
 python load-ipeds.py <FILENAME.csv>
 python load-scorecard.py <FILENAME.csv>
+```
