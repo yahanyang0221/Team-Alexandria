@@ -13,6 +13,15 @@ from credentials import user, password, host, dbname
 
 
 def load_data(file_path, relevant_columns):
+    """
+    this function loads the relevant columns from csv into pandas 
+    Args: 
+    file_path (str): file path to csv
+    relevant_columns (list): list of str column names for ipeds data
+
+    Returns: 
+    pandas.dataframe 
+    """
     # only load the columns we care about
     try:
         # attempt to read the CSV using 'utf-8' encoding first
@@ -26,11 +35,18 @@ def load_data(file_path, relevant_columns):
 
 
 def extract_year_from_filename(file_path):
-    """Extract the year from the IPEDS filename
-    (e.g., 'ipeds_2018.csv' -> 2018)."""
+    """extract the year from the IPEDS filename
+    (e.g., HD_2018.csv -> 2018).
+    
+    Args: 
+    file_path (str): file path
+
+    Returns: 
+    year (int)
+    """
     match = re.search(r'(\d{4})\.csv$', file_path)
     if match:
-        return int(match.group(1))  # Extracts the 4-digit year
+        return int(match.group(1))  # extracts 4-digit year
     return None
 
 
@@ -39,6 +55,20 @@ def handle_empty_string(value):
 
 
 def preprocess_data(df):
+    """
+    preprocess the dataframe 
+    - get the year column
+    - fix datatypes (fixing values outside of bigint range)
+    - dropping rows with NAs for the ID columns
+    - converting empty stirng to nan 
+
+    Args:
+    df (pandas dataframe): dataframe before processing 
+
+    Returns:
+    (pandas dataframe): df after preprocessing
+    
+    """
 
     # get the year from the filename
     year = extract_year_from_filename(file_path)
@@ -73,8 +103,7 @@ def preprocess_data(df):
                                                    BIGINT_MAX) else x
         )
 
-    # Drop rows where any required fields have NaN values
-    # (you can adjust this based on your needs)
+    # drop rows where any required fields have NaN values
     df.dropna(subset=['UNITID', 'OPEID'], inplace=True)
 
     num_rows = df.shape[0]
@@ -84,13 +113,24 @@ def preprocess_data(df):
 
 
 def insert_data_batch(df, table_columns, table_name, conn, batch_size=100):
+    """
+    inserting the data into batches of size 100 (all tables except institution) 
+
+    Args:
+    df (pandas dataframe)
+    table_columns (list): relevant columns in table
+    table_name (str): name of table
+    conn (psycog postgres connection)
+    batch_size (int)
+    
+    """
     cursor = conn.cursor()
 
     columns = ', '.join(table_columns)
 
     insert_query = f"INSERT INTO {table_name} ({columns}) VALUES %s"
 
-    # Prepare data for batch insertion
+    # prepare data for batch insertion
     data_tuples = [tuple(row) for _, row in df[table_columns].iterrows()]
 
     try:
@@ -108,6 +148,18 @@ def insert_data_batch(df, table_columns, table_name, conn, batch_size=100):
 
 
 def insert_data(df, table_columns, table_name, conn):
+    """
+    inserting the data into rows individually (all tables except institution) 
+    this function was used for testing
+
+    Args:
+    df (pandas dataframe)
+    table_columns (list): relevant columns in table
+    table_name (str): name of table
+    conn (psycog postgres connection)
+    batch_size (int)
+    
+    """
     cursor = conn.cursor()
 
     columns = ', '.join(table_columns)
@@ -124,6 +176,15 @@ def insert_data(df, table_columns, table_name, conn):
 
 
 def insert_institution(df, conn):
+    """
+    inserting the data into main institution table by individual row 
+    used for testing
+
+    Args:
+
+    df(pandas dataframe)
+    conn (psycog postgres connecction) 
+    """
     cursor = conn.cursor()
 
     for index, row in df.iterrows():
@@ -166,6 +227,14 @@ def insert_institution(df, conn):
 
 
 def insert_institution_batch(df, conn, batch_size=100):
+    """
+    inserting the data into main institution table by batch 
+
+    Args:
+
+    df(pandas dataframe)
+    conn (psycog postgres connecction) 
+    """
     # Deduplicate based on the conflict key 'OPEID'
     df = df.drop_duplicates(subset=['OPEID'])
 
@@ -221,6 +290,14 @@ def insert_institution_batch(df, conn, batch_size=100):
 
 
 def main(file_path):
+    """
+    main function which: 
+    1. reads data 
+    2. preprocesses it 
+    3. inserts into all six tables (by batch) 
+        ** has error handling
+    """
+
     # Define relevant columns needed from IPEDS data
     relevant_columns = list(set(hd_institution_columns + hd_loan_columns +
                                 hd_graduation_columns + hd_faculty_columns +
