@@ -92,7 +92,7 @@ def preprocess_data(df):
     BIGINT_MIN = -9223372036854775808
     BIGINT_MAX = 9223372036854775807
 
-    # handing BIG INT ERROR
+    # handling BIG INT ERROR
     for column in df.select_dtypes(include=['int64', 'float64']).columns:
         # Convert non-numeric entries to NaN
         df[column] = pd.to_numeric(df[column], errors='coerce')
@@ -235,7 +235,7 @@ def insert_institution_batch(df, conn, batch_size=100):
     df(pandas dataframe)
     conn (psycog postgres connecction) 
     """
-    # Deduplicate based on the conflict key 'OPEID'
+    # dropping dupes based on the problematic key OPEID
     df = df.drop_duplicates(subset=['OPEID'])
 
     cursor = conn.cursor()
@@ -264,7 +264,7 @@ def insert_institution_batch(df, conn, batch_size=100):
             UPDATED_AT = NOW()
     """
 
-    # Prepare the data for batch insertion
+    # preping for batch insertion
     data_tuples = [
         (
             row.UNITID, row.OPEID, row.INSTNM, row.LATITUDE, row.LONGITUD,
@@ -275,7 +275,7 @@ def insert_institution_batch(df, conn, batch_size=100):
     ]
 
     try:
-        # Insert data in batches
+        # try to insert in the batches
         for i in range(0, len(data_tuples), batch_size):
             batch = data_tuples[i:i + batch_size]
             execute_values(cursor, insert_query, batch,
@@ -319,17 +319,17 @@ def main(file_path):
             print("institution entered")
             #insert_data(df, hd_institution_columns, 'institution', conn)
             insert_institution_batch(df, conn)
-            #print("1/6 institution inserted")
+            # print("1/6 institution inserted")
 
         if set(hd_loan_columns).intersection(df.columns):
             print("loan entered")
             insert_data_batch(df, hd_loan_columns, 'loan', conn)
-            #print("2/6 loan inserted")
+            # print("2/6 loan inserted")
 
         if set(hd_graduation_columns).intersection(df.columns):
             print("grad entered")
             insert_data_batch(df, hd_graduation_columns, 'graduation', conn)
-            #print("3/6 grad inserted")
+            # print("3/6 grad inserted")
 
         if set(hd_faculty_columns).intersection(df.columns):
             print("faculty entered")
