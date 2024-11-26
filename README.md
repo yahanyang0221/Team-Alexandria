@@ -29,6 +29,7 @@ This repository contains scripts for loading and preprocessing IPEDS and College
 - Alternatively, use *insert_data( )* for row-by-row insertion
 - *insert_institution( )* and *insert_institution_batch( )* functions handle insertion into the Institution table, with conflict resolution on the OPEID column (for IPEDS data)
 - *insert_institution_batch( )* function handles insertion into the Institution table, with conflict resolution on the OPEID column (for College Scorecard data)
+- For our updated version, we recommend inserting row by row for "institution" table and batch for others to ensure better error message for debugging.
 
 ### 5. Main Function:
 - *main( )* function manages the data loading and insertion process:
