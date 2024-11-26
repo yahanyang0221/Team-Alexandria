@@ -1,4 +1,4 @@
 host = "pinniped.postgres.database.azure.com"
-dbname = "rtshah",
-user = "rtshah"
-password = "Hp7HklBKM0"
+dbname = DB_USERNAME, 
+user = DB_USERNAME,
+password = DB_PASSWORD
