@@ -1,4 +1,4 @@
-# :school: Team-Alexandria (w College Scorecard Data)
+# :school: Team-Alexandria (w College Data)
 
 ## Data Loading Instructions 
 
