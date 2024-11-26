@@ -14,48 +14,36 @@ from credentials import user, password, host, dbname
 
 def load_data(file_path, relevant_columns):
     """
-    this function loads the relevant columns from csv into pandas
-    Args:
-    file_path (str): file path to csv
-    relevant_columns (list): list of str column names for scorecard data
-
-    Returns:
-    pandas.dataframe
+    Load the relevant columns from the CSV file into a Pandas DataFrame.
     """
-    # only load the columns we care about
+    # Exclude 'YEAR' since it is dynamically added later
+    relevant_columns = [col for col in relevant_columns if col != 'YEAR']
+
     try:
-        # attempt to read the CSV using 'utf-8' encoding first
+        # Attempt to read the CSV using 'utf-8' encoding first
         df = pd.read_csv(file_path, usecols=relevant_columns, encoding='utf-8')
     except UnicodeDecodeError:
-        # if 'utf-8' fails, try 'ISO-8859-1' or 'latin1'
-        df = pd.read_csv(file_path, usecols=relevant_columns,
-                         encoding='ISO-8859-1')
+        # If 'utf-8' fails, try 'ISO-8859-1' or 'latin1'
+        df = pd.read_csv(file_path, usecols=relevant_columns, encoding='ISO-8859-1')
 
+    df = df[[col for col in relevant_columns if col in df.columns]]
     return df
 
 
 def extract_year_from_filename(file_path):
-    """extract the year from the scorecard filename
-    (e.g., MERGED2018_19_PP.csv -> 2019).
-
-    Args:
-    file_path (str): file path
-
-    Returns:
-    year (int)
-    """
-    match = re.search(r'MERGED_(\d{4})_(\d{2})_', file_path)
+    """Extract year from scorecard filename (e.g., 'MERGED_2021_22_PP.csv' -> 2022)."""
+    match = re.search(r'MERGED(\d{4})_(\d{2})_', file_path)
     if match:
-        return int(match.group(2))
-    # Extracts the second year (e.g., 22 in 2021_22 -> 2022)
+        return int(match.group(1))+1
     return None
 
 
 def handle_empty_string(value):
+    
     return None if value == '' else value
 
 
-def preprocess_data(df):
+def preprocess_data(df, file_path):
     """
     preprocess the dataframe
     - get the year column
@@ -75,6 +63,8 @@ def preprocess_data(df):
     year = extract_year_from_filename(file_path)
     if year:
         df['YEAR'] = year
+    
+    print(f"YEAR column added: {year}")
 
     # replace -999 with None
     df.replace(-999, None, inplace=True)
@@ -162,15 +152,14 @@ def insert_data(df, table_columns, table_name, conn):
 
 def insert_data_batch(df, table_columns, table_name, conn, batch_size=100):
     """
-    inserting the data into batches of size 100 (all tables except institution)
+    Insert data into the specified table in batches, with rollback on error.
 
     Args:
-    df (pandas dataframe)
-    table_columns (list): relevant columns in table
-    table_name (str): name of table
-    conn (psycog postgres connection)
-    batch_size (int)
-
+    df (pandas dataframe): DataFrame containing the data to be inserted.
+    table_columns (list): List of columns to insert.
+    table_name (str): Name of the table in the database.
+    conn (psycopg2 connection): Active database connection.
+    batch_size (int): Number of rows per batch.
     """
     cursor = conn.cursor()
 
@@ -182,17 +171,81 @@ def insert_data_batch(df, table_columns, table_name, conn, batch_size=100):
     data_tuples = [tuple(row) for _, row in df[table_columns].iterrows()]
 
     try:
+
         # Use execute_values for batch insert
         for i in range(0, len(data_tuples), batch_size):
             batch = data_tuples[i:i + batch_size]
-            execute_values(cursor, insert_query, batch)
-            conn.commit()
-            print(f"Inserted batch ending at row {i + batch_size}")
+            try:
+                execute_values(cursor, insert_query, batch)
+                print(f"Inserted batch ending at row {i + batch_size}")
+            except Exception as e:
+                print(f"Error in batch {i}-{i + batch_size}: {e}")
+                raise  # Re-raise the exception to trigger rollback
+
+        # Commit the transaction after successful insertion of all batches
+        conn.commit()
     except Exception as e:
-        print(f"Error during batch insert into {table_name}: {e}")
+        # Rollback the transaction if any error occurs
+        print(f"Rolling back due to error: {e}")
         conn.rollback()
     finally:
         cursor.close()
+
+
+def insert_institution(df, conn):
+    """
+    Insert data into the Institution table row by row.
+
+    Args:
+    df (pandas DataFrame): DataFrame containing data to insert.
+    conn (psycopg2 connection): Active database connection.
+    """
+    # Deduplicate based on the conflict key 'OPEID'
+    df = df.drop_duplicates(subset=['OPEID'])
+
+    cursor = conn.cursor()
+
+    insert_query = """
+        INSERT INTO Institution (
+            UNITID, OPEID, INSTNM, ACCREDAGENCY, CONTROL,
+            REGION, MAIN, NUMBRANCH, ZIP, CITY, ADDR,
+            PREDDEG, HIGHDEG
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        ON CONFLICT (UNITID) DO UPDATE SET
+            INSTNM = EXCLUDED.INSTNM,
+            ACCREDAGENCY = EXCLUDED.ACCREDAGENCY,
+            CONTROL = EXCLUDED.CONTROL,
+            REGION = EXCLUDED.REGION,
+            MAIN = EXCLUDED.MAIN,
+            NUMBRANCH = EXCLUDED.NUMBRANCH,
+            ZIP = EXCLUDED.ZIP,
+            CITY = EXCLUDED.CITY,
+            ADDR = EXCLUDED.ADDR,
+            PREDDEG = EXCLUDED.PREDDEG,
+            HIGHDEG = EXCLUDED.HIGHDEG
+    """
+
+    try:
+        # Insert data row by row
+        for index, row in df.iterrows():
+            try:
+                cursor.execute(insert_query, (
+                    row.UNITID, row.OPEID, row.INSTNM, row.ACCREDAGENCY, row.CONTROL,
+                    row.REGION, row.MAIN, row.NUMBRANCH, row.ZIP, row.CITY,
+                    row.ADDR, row.PREDDEG, row.HIGHDEG
+                ))
+                conn.commit()
+                print(f"Inserted row {index + 1}")
+            except Exception as row_error:
+                print(f"Error inserting row {index + 1}: {row_error}")
+                conn.rollback()
+
+    except Exception as e:
+        print(f"Error during row insert: {e}")
+        conn.rollback()
+    finally:
+        cursor.close()
+
 
 
 def insert_institution_batch(df, conn, batch_size=100):
@@ -213,10 +266,10 @@ def insert_institution_batch(df, conn, batch_size=100):
     insert_query = """
         INSERT INTO Institution (
             UNITID, OPEID, INSTNM, ACCREDAGENCY, CONTROL,
-            REGION, MAIN, NUMBRANCH, ZIP,
-            CITY, ADDR, PREDDEG, HIGHDEG
+            REGION, MAIN, NUMBRANCH, ZIP, CITY, ADDR,
+            PREDDEG, HIGHDEG
         ) VALUES %s
-        ON CONFLICT (OPEID) DO UPDATE SET
+        ON CONFLICT (UNITID) DO UPDATE SET
             INSTNM = EXCLUDED.INSTNM,
             ACCREDAGENCY = EXCLUDED.ACCREDAGENCY,
             CONTROL = EXCLUDED.CONTROL,
@@ -228,6 +281,7 @@ def insert_institution_batch(df, conn, batch_size=100):
             ADDR = EXCLUDED.ADDR,
             PREDDEG = EXCLUDED.PREDDEG,
             HIGHDEG = EXCLUDED.HIGHDEG
+            -- Do not modify OPEID to avoid foreign key violations
     """
 
     # Prepare the data for batch insertion
@@ -274,7 +328,7 @@ def main(file_path):
         score_admission_columns + score_tuition_columns))
 
     df = load_data(file_path, relevant_columns)
-    df = preprocess_data(df)
+    df = preprocess_data(df, file_path)
 
     conn = psycopg2.connect(host=host, dbname=dbname,
                             user=user, password=password)
@@ -283,29 +337,34 @@ def main(file_path):
         # Insert into each table based on available columns
         if set(score_institution_columns).intersection(df.columns):
             print("institution entered")
-            insert_institution_batch(df, conn)
+            insert_institution(df, conn)
 
         if set(score_loan_columns).intersection(df.columns):
             print("loan entered")
             insert_data_batch(df, score_loan_columns, 'loan', conn)
+            # insert_data(df, score_loan_columns, 'loan', conn)
 
         if set(score_graduation_columns).intersection(df.columns):
             print("graduation entered")
             insert_data_batch(df, score_graduation_columns, 'graduation', conn)
+            # insert_data(df, score_graduation_columns, 'graduation', conn)
 
         if set(score_faculty_columns).intersection(df.columns):
             print("faculty entered")
             insert_data_batch(df, score_faculty_columns, 'faculty', conn)
+            # insert_data(df, score_faculty_columns, 'faculty', conn)
 
         if set(score_admission_columns).intersection(df.columns):
             print("admission entered")
             new_score_cols = ["OPEID", "ADM_RATE", "SATCMMID",
                               "ACTCMMID", "ADMCON7"]
+            # insert_data_batch(df, new_score_cols, 'admission', conn)
             insert_data_batch(df, new_score_cols, 'admission', conn)
 
         if set(score_tuition_columns).intersection(df.columns):
             print("tuition entered")
             insert_data_batch(df, score_tuition_columns, 'tuition', conn)
+            # insert_data(df, score_tuition_columns, 'tuition', conn)
 
         print(f"Data from {file_path} successfully loaded.")
 
