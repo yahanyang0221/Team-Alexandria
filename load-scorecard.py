@@ -14,16 +14,13 @@ from credentials import user, password, host, dbname
 
 def load_data(file_path, relevant_columns):
     """
-    Load the relevant columns from the CSV file into a Pandas DataFrame.
+    Load relevant columns from a CSV file into a Pandas DataFrame.
     """
-    # Exclude 'YEAR' since it is dynamically added later
     relevant_columns = [col for col in relevant_columns if col != 'YEAR']
 
     try:
-        # Attempt to read the CSV using 'utf-8' encoding first
         df = pd.read_csv(file_path, usecols=relevant_columns, encoding='utf-8')
     except UnicodeDecodeError:
-        # If 'utf-8' fails, try 'ISO-8859-1' or 'latin1'
         df = pd.read_csv(file_path, usecols=relevant_columns, encoding='ISO-8859-1')
 
     df = df[[col for col in relevant_columns if col in df.columns]]
@@ -45,67 +42,42 @@ def handle_empty_string(value):
 
 def preprocess_data(df, file_path):
     """
-    preprocess the dataframe
-    - get the year column
-    - fix datatypes (fixing values outside of bigint range)
-    - dropping rows with NAs for the ID columns
-    - converting empty stirng to nan
-
-    Args:
-    df (pandas dataframe): dataframe before processing
-
-    Returns:
-    (pandas dataframe): df after preprocessing
-
+    Preprocess the DataFrame: add YEAR, fix datatypes, drop invalid rows, handle missing data.
     """
-
-    # get the year from the filename
     year = extract_year_from_filename(file_path)
     if year:
         df['YEAR'] = year
-    
-    print(f"YEAR column added: {year}")
+        print(f"YEAR column added: {year}")
 
-    # replace -999 with None
     df.replace(-999, None, inplace=True)
-
-    # apply handle_empty_string to all relevant columns in the dataframe
+    df.replace("PrivacySuppressed", None, inplace=True) 
     df.replace(" ", np.nan, inplace=True)
-
     df.replace([np.inf, -np.inf, np.nan], None, inplace=True)
 
     for column in df.columns:
-        df[column] = df[column].apply(handle_empty_string)
+        df[column] = df[column].apply(lambda x: None if x == '' else x)
 
-    # big int range
     BIGINT_MIN = -9223372036854775808
     BIGINT_MAX = 9223372036854775807
 
-    # handing BIG INT ERROR
     for column in df.select_dtypes(include=['int64', 'float64']).columns:
-        # Convert non-numeric entries to NaN
         df[column] = pd.to_numeric(df[column], errors='coerce')
-
-        # Cap values to BIGINT range and convert out-of-range values to NaN
         df[column] = df[column].apply(
             lambda x: np.nan if pd.notnull(x) and (
                 x < BIGINT_MIN or x > BIGINT_MAX) else x
         )
 
-    # drop rows where any required fields have NaN values
-    df.dropna(subset=['UNITID', 'OPEID'], inplace=True)
+    df.dropna(subset=['OPEID'], inplace=True)
 
-    # preprocessing column types
     columns_to_coerce = [
         'SATVRMID', "SATMTMID", "SATWRMID", "ACTCMMID", "COSTT4_A",
         "COSTT4_P", "TUITIONFEE_IN", "TUITIONFEE_OUT", "TUITIONFEE_PROG",
-        "TUITFTE", "AVGFACSAL", "UGNONDS", "GRADS",  "MD_EARN_WNE_4YR"]
+        "TUITFTE", "AVGFACSAL", "UGNONDS", "GRADS", "MD_EARN_WNE_4YR"
+    ]
     for column in columns_to_coerce:
-        # If the column contains NaN values, replace them before coercion
-        df[column] = df[column].fillna(0).astype(int)
-        # Replace NaN with 0 or any other suitable value
+        if column in df.columns:
+            df[column] = df[column].fillna(0).astype(int)
 
-    # preprocessing boolean column
     boolean_columns = ['MAIN']
     for col in boolean_columns:
         if col in df.columns:
@@ -114,9 +86,10 @@ def preprocess_data(df, file_path):
     if all(col in df.columns for col in ['SATVRMID', 'SATMTMID', 'SATWRMID']):
         df['SATCMMID'] = df[['SATVRMID', 'SATMTMID', 'SATWRMID']].sum(axis=1)
 
-    num_rows = df.shape[0]
-    print("rows to insert: ", num_rows)
+    df = df.replace({float("NaN"): None})
 
+    print(df.dtypes)
+    print("Rows to insert:", df.shape[0])
     return df
 
 
@@ -152,40 +125,21 @@ def insert_data(df, table_columns, table_name, conn):
 
 def insert_data_batch(df, table_columns, table_name, conn, batch_size=100):
     """
-    Insert data into the specified table in batches, with rollback on error.
-
-    Args:
-    df (pandas dataframe): DataFrame containing the data to be inserted.
-    table_columns (list): List of columns to insert.
-    table_name (str): Name of the table in the database.
-    conn (psycopg2 connection): Active database connection.
-    batch_size (int): Number of rows per batch.
+    Insert data into the specified table in batches.
     """
     cursor = conn.cursor()
-
     columns = ', '.join(table_columns)
-
     insert_query = f"INSERT INTO {table_name} ({columns}) VALUES %s"
 
-    # Prepare data for batch insertion
     data_tuples = [tuple(row) for _, row in df[table_columns].iterrows()]
 
     try:
-
-        # Use execute_values for batch insert
         for i in range(0, len(data_tuples), batch_size):
             batch = data_tuples[i:i + batch_size]
-            try:
-                execute_values(cursor, insert_query, batch)
-                print(f"Inserted batch ending at row {i + batch_size}")
-            except Exception as e:
-                print(f"Error in batch {i}-{i + batch_size}: {e}")
-                raise  # Re-raise the exception to trigger rollback
-
-        # Commit the transaction after successful insertion of all batches
+            execute_values(cursor, insert_query, batch)
+            print(f"Inserted batch ending at row {i + batch_size}")
         conn.commit()
     except Exception as e:
-        # Rollback the transaction if any error occurs
         print(f"Rolling back due to error: {e}")
         conn.rollback()
     finally:
@@ -245,7 +199,6 @@ def insert_institution(df, conn):
         conn.rollback()
     finally:
         cursor.close()
-
 
 
 def insert_institution_batch(df, conn, batch_size=100):
@@ -314,18 +267,16 @@ def insert_institution_batch(df, conn, batch_size=100):
 
 def main(file_path):
     """
-    main function which:
-    1. reads data
-    2. preprocesses it
-    3. inserts into all six tables (by batch)
-        ** has error handling
+    Main function: process and load data into non-institution tables.
     """
-
-    # relevant columns needed from scorecard data
     relevant_columns = list(set(
-        score_institution_columns + score_loan_columns +
-        score_graduation_columns + score_faculty_columns +
-        score_admission_columns + score_tuition_columns))
+        score_institution_columns +
+        score_loan_columns +
+        score_graduation_columns +
+        score_faculty_columns +
+        score_admission_columns +
+        score_tuition_columns
+    ))
 
     df = load_data(file_path, relevant_columns)
     df = preprocess_data(df, file_path)
@@ -334,37 +285,29 @@ def main(file_path):
                             user=user, password=password)
 
     try:
-        # Insert into each table based on available columns
         if set(score_institution_columns).intersection(df.columns):
-            print("institution entered")
-            insert_institution(df, conn)
+            print("Inserting into institution table...")
+            insert_institution_batch(df, conn)
 
         if set(score_loan_columns).intersection(df.columns):
-            print("loan entered")
+            print("Inserting into loan table...")
             insert_data_batch(df, score_loan_columns, 'loan', conn)
-            # insert_data(df, score_loan_columns, 'loan', conn)
 
         if set(score_graduation_columns).intersection(df.columns):
-            print("graduation entered")
+            print("Inserting into graduation table...")
             insert_data_batch(df, score_graduation_columns, 'graduation', conn)
-            # insert_data(df, score_graduation_columns, 'graduation', conn)
 
         if set(score_faculty_columns).intersection(df.columns):
-            print("faculty entered")
+            print("Inserting into faculty table...")
             insert_data_batch(df, score_faculty_columns, 'faculty', conn)
-            # insert_data(df, score_faculty_columns, 'faculty', conn)
 
         if set(score_admission_columns).intersection(df.columns):
-            print("admission entered")
-            new_score_cols = ["OPEID", "ADM_RATE", "SATCMMID",
-                              "ACTCMMID", "ADMCON7"]
-            # insert_data_batch(df, new_score_cols, 'admission', conn)
-            insert_data_batch(df, new_score_cols, 'admission', conn)
+            print("Inserting into admission table...")
+            insert_data_batch(df, score_admission_columns, 'admission', conn)
 
         if set(score_tuition_columns).intersection(df.columns):
-            print("tuition entered")
+            print("Inserting into tuition table...")
             insert_data_batch(df, score_tuition_columns, 'tuition', conn)
-            # insert_data(df, score_tuition_columns, 'tuition', conn)
 
         print(f"Data from {file_path} successfully loaded.")
 
