@@ -1,7 +1,7 @@
 # :school: Team-Alexandria (w College Data)
 
 ## Streamlit Dashboard
-You can access the Streamlit dashboard [here](http://172.26.121.190:8501) to better understand our data.
+You can access the Streamlit dashboard [here](https://team-alexandria-ew7dyqwbyetmvn2czd2ard.streamlit.app/) to better understand our data.
 
 
 ## Data Loading Instructions 
