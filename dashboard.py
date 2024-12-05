@@ -211,71 +211,61 @@ if menu_options == "🗒️ Table 3: Tuition Rates by State and CC":
 if menu_options == "🗒️ Table 4: Loan Repayment Performance":
     st.subheader("🗒️ Table 4: Loan Repayment Performance")
 
-    # Query to join institution and tuition tables
-    query_tb4 = """
-        WITH FinancialPerformance AS (
-        SELECT
-            Tuition.opeid,
-            Institution.instnm AS institution_name,
-            AVG(Loan.dbrr5_fed_ug_rt) AS avg_loan_repayment_rate
-        FROM Tuition
-        LEFT JOIN Loan ON Tuition.opeid = Loan.opeid
-        LEFT JOIN Institution ON Tuition.opeid = Institution.opeid
-        WHERE Tuition.year = %s
-        GROUP BY Tuition.opeid, Institution.instnm
-    ),
-    BestWorstPerforming AS (
-        SELECT * FROM (
-            SELECT
-                *,
-                'Best Performing' AS performance_category
-                FROM FinancialPerformance
-                ORDER BY avg_loan_repayment_rate DESC
-                LIMIT 1
-        ) AS Best
-        UNION ALL
-        SELECT * FROM (
-            SELECT
-                *,
-                'Worst Performing' AS performance_category
-                FROM FinancialPerformance
-                ORDER BY avg_loan_repayment_rate ASC
-                LIMIT 1
-        ) AS Worst
-    )
-    SELECT
-        performance_category,
-        institution_name,
-        avg_loan_repayment_rate
-        FROM BestWorstPerforming;
+    # top 5 query
+    query_top_5 = """
+    SELECT 
+        Institution.instnm AS institution_name, 
+        AVG(Loan.dbrr5_fed_ug_rt) AS avg_loan_repayment_rate,
+        'Best Performing' AS performance_category
+    FROM Tuition 
+    LEFT JOIN Loan ON Tuition.opeid = Loan.opeid 
+    LEFT JOIN Institution ON Tuition.opeid = Institution.opeid
+    WHERE 
+        Tuition.year = %s 
+        AND Loan.dbrr5_fed_ug_rt > 0
+    GROUP BY Institution.instnm
+    ORDER BY avg_loan_repayment_rate DESC
+    LIMIT 5;
     """
 
-    # Execute the query
+    # bottom q5 query
+    query_bottom_5 = """
+    SELECT 
+        Institution.instnm AS institution_name, 
+        AVG(Loan.dbrr5_fed_ug_rt) AS avg_loan_repayment_rate,
+        'Worst Performing' AS performance_category
+    FROM Tuition 
+    LEFT JOIN Loan ON Tuition.opeid = Loan.opeid 
+    LEFT JOIN Institution ON Tuition.opeid = Institution.opeid
+    WHERE 
+        Tuition.year = %s 
+        AND Loan.dbrr5_fed_ug_rt > 0
+    GROUP BY Institution.instnm
+    ORDER BY avg_loan_repayment_rate ASC
+    LIMIT 5;
+    """
+
     try:
-        cursor.execute(query_tb4, (selected_year,))
-        data = cursor.fetchall()
-
-        # Get column names
+        cursor.execute(query_top_5, (selected_year,))
+        top_5_data = cursor.fetchall()
+        
+        cursor.execute(query_bottom_5, (selected_year,))
+        bottom_5_data = cursor.fetchall()
+      
         columns = [desc[0] for desc in cursor.description]
-
-        # Create a DataFrame
-        df = pd.DataFrame(data, columns=columns)
-
-        # Highlight best and worst performing rows
-        def highlight_performance(row):
-            if row['performance_category'] == 'Best Performing':
-                return ['background-color: lightgreen'] * len(row)
-            elif row['performance_category'] == 'Worst Performing':
-                return ['background-color: lightcoral'] * len(row)
-            else:
-                return [''] * len(row)
-
-        # Display the data in Streamlit with styling
-        st.write("### Best and Worst Performing Institutions")
-        st.dataframe(df.style.apply(highlight_performance, axis=1))
+        
+        df_top_5 = pd.DataFrame(top_5_data, columns=columns)
+        df_bottom_5 = pd.DataFrame(bottom_5_data, columns=columns)
+        
+        st.write("### Top 5 Best Performing Institutions")
+        st.dataframe(df_top_5)
+        
+        st.write("### Top 5 Worst Performing Institutions")
+        st.dataframe(df_bottom_5)
 
     except Exception as e:
         st.error(f"Error executing the query for Table 4: {e}")
+
 
 if menu_options == "🗒️ Table 5: Admission and Students":
     st.subheader("🗒️ Table 5: Admission and Students")
